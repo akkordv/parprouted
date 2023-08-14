@@ -1,0 +1,104 @@
+#!/bin/sh
+
+# Init file for parprouted server daemon
+#
+# chkconfig: 2345 54 26
+# description: parprouted server daemon
+#
+# processname: parprouted
+# config: /etc/sysconfig/parprouted
+# pidfile: /var/run/parprouted.pid
+
+WITHOUT_RC_COMPAT=1
+
+# Source function library.
+. /etc/init.d/functions
+
+# Source networking configuration.
+SourceIfNotEmpty /etc/sysconfig/network
+
+EXTRAOPTIONS=
+INTERFACES=
+EXEC_PATH=@PREFIX@/sbin
+EXEC_NAME=parprouted
+EXEC_ABSOLUTE=$EXEC_PATH/$EXEC_NAME
+LOCKFILE=/var/lock/subsys/$EXEC_NAME
+
+# Source config.
+SourceIfNotEmpty /etc/sysconfig/$EXEC_NAME
+
+RETVAL=0
+
+start()
+{
+	is_yes "$NETWORKING" || return 0
+	if is_yes "$FLUSH_ON_START"; then
+	    for i in $INTERFACES; do
+		ip neigh flush dev $i nud permanent
+	    done
+	fi
+	start_daemon --lockfile "$LOCKFILE" --expect-user root -- $EXEC_ABSOLUTE $EXTRAOPTIONS $INTERFACES
+	RETVAL=$?
+	return $RETVAL
+}
+
+stop()
+{
+	stop_daemon --lockfile "$LOCKFILE" --expect-user root -- $EXEC_ABSOLUTE
+	RETVAL=$?
+	return $RETVAL
+}
+
+reload()
+{
+	msg_reloading $EXEC_NAME
+	stop_daemon --expect-user root -HUP -- $EXEC_ABSOLUTE
+	RETVAL=$?
+	return $RETVAL
+}
+
+restart()
+{
+	stop
+	start
+}
+
+# See how we were called.
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	reload)
+		reload
+		;;
+	restart)
+		restart
+		;;
+	condstop)
+		if [ -e "$LOCKFILE" ]; then
+			stop
+		fi
+		;;
+	condrestart)
+		if [ -e "$LOCKFILE" ]; then
+			restart
+		fi
+		;;
+	condreload)
+		if [ -e "$LOCKFILE" ]; then
+			reload
+		fi
+		;;
+	status)
+		status --expect-user root -- $EXEC_ABSOLUTE
+		RETVAL=$?
+		;;
+	*)
+		msg_usage "${0##*/} {start|stop|reload|restart|condstop|condrestart|condreload|check|status}"
+		RETVAL=1
+esac
+
+exit $RETVAL

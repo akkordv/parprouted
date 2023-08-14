@@ -1,24 +1,30 @@
 EXTRA_CFLAGS = 
 
-PREFIX = $(DESTDIR)/usr
+PREFIX = /opt/parprouted
+INITD = $(PREFIX)/init.d
+#INITD = /etc/rc.d/init.d
 
-#CC = gcc
+CC = gcc-10
 
 CFLAGS = -g -O2 -Wall $(EXTRA_CFLAGS)
 # For ARM:
 # CFLAGS =  -Wall $(EXTRA_CFLAGS)
 OBJS = parprouted.o arp.o
 
-LIBS = -lpthread
+LIBS = -lpthread -lresolv
 
-all: parprouted
+all: parprouted parprouted.8 parprouted.sh
 
 install: all
+	install -d $(PREFIX)/sbin
 	install parprouted $(PREFIX)/sbin
-	install parprouted.8 $(PREFIX)/share/man/man8
+	install -d $(PREFIX)/share/man/man8
+	install -m 644 parprouted.8 $(PREFIX)/share/man/man8
+	install -d $(INITD)
+	install parprouted.sh $(INITD)/parprouted
 
 clean:
-	rm -f $(OBJS) parprouted core
+	rm -f $(OBJS) parprouted core parprouted.8 parprouted.sh
 
 parprouted:	${OBJS}
 	${CC} -g -o parprouted ${OBJS} ${CFLAGS} ${LDFLAGS} ${LIBS}
@@ -29,3 +35,6 @@ parprouted.8:	parprouted.pod
 parprouted.o : parprouted.c parprouted.h
 
 arp.o : arp.c parprouted.h
+
+parprouted.sh: parprouted.sh.in Makefile
+	sed s#@PREFIX@#$(PREFIX)#g parprouted.sh.in > parprouted.sh

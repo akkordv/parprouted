@@ -28,7 +28,7 @@
 
 #define MAX_RQ_SIZE 50	/* maximum size of request queue */
 
-#define VERSION "0.7"
+#define VERSION "0.7k"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -64,6 +64,10 @@ extern int debug;
 extern int verbose;
 
 extern int option_arpperm;
+extern int option_sendgratuitous;
+extern int option_addressless;
+extern int option_network_size;
+extern struct in_addr option_network_number;
 
 extern ARPTAB_ENTRY **arptab;
 extern pthread_mutex_t arptab_mutex;
@@ -74,7 +78,7 @@ extern int last_iface_idx;
 
 extern void *arp(char *ifname);
 extern void refresharp(ARPTAB_ENTRY *list);
-extern void arp_req(char *ifname, struct in_addr remaddr, int gratuitous);
+extern void arp_req(char *ifname, struct in_addr remaddr, struct in_addr myaddr, int gratuitous);
 
 extern void parseproc();
 extern void processarp(int cleanup);

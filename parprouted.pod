@@ -7,7 +7,7 @@ B<parprouted> - Proxy ARP IP bridging daemon
 
 =head1 SYNOPSIS
 
-B<parprouted> [B<-d>] [B<-p>] B<interface> [B<interface>]
+B<parprouted> [B<-d>] [B<-p>] [B<-g>] [B<-a>] [B<-n network>] B<interface> [B<interface>]
 
 =head1 DESCRIPTION
 
@@ -53,8 +53,6 @@ parprouted requires "ip" program from iproute2 tools to be installed in
 occurances in the source with the correct path. As well you should have
 proc filesystem mounted in /proc because the daemon uses /proc/net/arp.
 
-parprouted is designed for and tested only with Linux 2.4.x kernels.
-
 =head1 OPTIONS
 
 The list of interfaces to do bridging on should be given via the command
@@ -62,12 +60,20 @@ line.
 
 The daemon accepts the following switches:
 
-B<-d>, which stands for debugging. If you run it in debugging mode the daemon 
+B<-d|--debug>, which stands for debugging. If you run it in debugging mode the daemon 
 will not go to background and will print additional debugging information to 
 stdout/stderr.
 
-B<-p>, which makes all ARP entries to be permanent. This will also
+B<-p|--permanent>, which makes all ARP entries to be permanent. This will also
 result in that ARP tables will not be refreshed by ARP pings.
+
+B<-g|--gratuitous>, to send a Gratuitous ARP Announcement to other segments when an ARP 
+reply is received.
+
+B<-a|--addressless>, for addressless mode when bridged interfaces has no IP addresses.
+This mode implies --permanent
+
+B<-n|--network address/size>, to process ARP traffic only for a given network.
 
 =head1 EXAMPLE
 

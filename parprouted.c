@@ -24,6 +24,10 @@ char *progname;
 int debug=0;
 int verbose=0;
 int option_arpperm=0;
+int option_sendgratuitous=0;
+int option_addressless=0;
+int option_network_size=-1;
+struct in_addr option_network_number;
 static int perform_shutdown=0;
 
 char *errstr;
@@ -261,10 +265,12 @@ void parseproc()
 	    /* if IP address is marked as undiscovered and does not exist in arptab,
 	       send ARP request to all ifaces */
 
-	    if (incomplete &! findentry(ipaddr) ) {
+	    if (!option_addressless && incomplete && !findentry(ipaddr)) {
+		struct in_addr nulladdr;
+		nulladdr.s_addr = 0;
 	    	if (debug)  printf("incomplete entry %s found, request on all interfaces\n", inet_ntoa(ipaddr));
 		for (i=0; i <= last_iface_idx; i++)
-		    arp_req(ifaces[i], ipaddr, 0);
+		    arp_req(ifaces[i], ipaddr, nulladdr, 0);
 	    }
 
 	    /* Hardware type */
@@ -387,33 +393,59 @@ void *main_thread()
 int main (int argc, char **argv)
 {
     pid_t child_pid;
-    int i, help=1;
+    int i, help=0;
     
     progname = (char *) basename(argv[0]);
     
+    memset(&option_network_number, 0, sizeof(struct in_addr));
+    
     for (i = 1; i < argc; i++) {
-	if (!strcmp(argv[i],"-d")) { 
+	if (!strcmp(argv[i],"-d") || !strcmp(argv[i],"--debug")) {
 	    debug=1;
-	    help=0;
 	}
-	else if (!strcmp(argv[i],"-p")) { 
+	else if (!strcmp(argv[i],"-p") || !strcmp(argv[i],"--permanent")) {
 	    option_arpperm=1;
-	    help=0;
+	}
+	else if (!strcmp(argv[i],"-g") || !strcmp(argv[i],"--gratuitous")) {
+	    option_sendgratuitous=1;
+	}
+	else if (!strcmp(argv[i],"-a") || !strcmp(argv[i],"--addressless")) {
+	    option_addressless=1;
+	    option_arpperm=1;
+	}
+	else if (!strcmp(argv[i],"-n") || !strcmp(argv[i],"--network")) {
+	    i+=1;
+	    option_network_size = inet_net_pton(AF_INET, argv[i], &option_network_number, sizeof(struct in_addr));
+	    if (option_network_size == -1) {
+		fprintf(stderr, "Error of network size calculation\n");
+		exit(-1);
+	    }
+	    if (debug) {
+		char test[20];
+		printf("Processed network: %s\n", inet_net_ntop(AF_INET, &option_network_number, option_network_size, test, 20) );
+		}
 	}
 	else if (!strcmp(argv[i],"-h") || !strcmp(argv[i],"--help")) {
+	    help=1;
+	    break;
+	}
+	else if (!strncmp(argv[i],"-",1)) {
+	    help=1;
 	    break;
 	}
 	else {
 	    last_iface_idx++;
 	    ifaces[last_iface_idx]=argv[i];
-	    help=0;
 	}
     }
 
     if (help || last_iface_idx <= -1) {
 	    printf("parprouted: proxy ARP routing daemon, version %s.\n", VERSION);
     	    printf("(C) 2007 Vladimir Ivaschenko <vi@maks.net>, GPL2 license.\n");
-	    printf("Usage: parprouted [-d] [-p] interface [interface]\n");
+	    printf("Usage: parprouted [-h|--help] [-d] [-p] [-g|-a] [-n network] interface [interface]\n");
+	    printf("		-d|--debug	verbose mode\n		-p|--permanent	permanent ARP entries\n");
+	    printf("		-g|--gratuitous		ARP Announcement\n		-a|--addressless	addressless mode\n");
+	    printf("		-n|--network address/size	processed network\n");
 	    exit(1);
     }
 

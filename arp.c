@@ -111,13 +111,8 @@ void arp_reply(ether_arp_frame *reqframe, struct sockaddr_ll *ifs)
   arp->arp_op = htons(ARPOP_REPLY);
 
   if (debug) {
-    struct in_addr sia;
-    struct in_addr dia;
-    
-    sia.s_addr = *((long *)arp->arp_spa);
-    dia.s_addr = *((long *)arp->arp_tpa);
-
-    printf("Replying to %s faking %s\n", inet_ntoa(sia), inet_ntoa(dia));
+    printf("Replying to %s ", inet_ntoa( *(struct in_addr *)arp->arp_spa ));
+    printf("faking %s\n", inet_ntoa( *(struct in_addr *)arp->arp_tpa ));
   }
 
   sendto(sock, reqframe, sizeof(ether_arp_frame), 0, 
@@ -128,7 +123,7 @@ void arp_reply(ether_arp_frame *reqframe, struct sockaddr_ll *ifs)
 
 /* Send ARP who-has request */
 
-void arp_req(char *ifname, struct in_addr remaddr, int gratuitous)
+void arp_req(char *ifname, struct in_addr remaddr, struct in_addr myaddr, int gratuitous)
 {
   ether_arp_frame frame;
   struct ether_arp *arp = &frame.arp;
@@ -167,12 +162,14 @@ void arp_req(char *ifname, struct in_addr remaddr, int gratuitous)
   ifs.sll_pkttype = PACKET_BROADCAST;
   ifs.sll_halen = ETH_ALEN;
 
-  if (ioctl(sock, SIOCGIFADDR, &ifr) == 0) {
+  if (myaddr.s_addr == 0 && !gratuitous) {
+    if (ioctl(sock, SIOCGIFADDR, &ifr) == 0) {
 	sin = (struct sockaddr_in *) &ifr.ifr_addr;
 	ifaddr = sin->sin_addr.s_addr;
-  } else {
+    } else {
 	syslog(LOG_ERR, "error: ioctl SIOCGIFADDR for %s: %s", (char *) ifname, strerror(errno));
 	return;
+    }
   }
 
   memset(&frame.ether_hdr.ether_dhost, 0xFF, ETH_ALEN);
@@ -190,7 +187,10 @@ void arp_req(char *ifname, struct in_addr remaddr, int gratuitous)
   if (gratuitous)
     memcpy(&arp->arp_spa, &remaddr.s_addr, 4);
   else
-    memcpy(&arp->arp_spa, &ifaddr, 4);
+    if (myaddr.s_addr == 0)
+      memcpy(&arp->arp_spa, &ifaddr, 4);
+    else
+      memcpy(&arp->arp_spa, &myaddr.s_addr, 4);
 
   arp->arp_op = htons(ARPOP_REQUEST);
 
@@ -206,11 +206,14 @@ void arp_req(char *ifname, struct in_addr remaddr, int gratuitous)
 
 void refresharp(ARPTAB_ENTRY *list)
 {
+  struct in_addr nulladdr;
+  nulladdr.s_addr = 0;
+  
   if (debug) 
       printf("Refreshing ARP entries.\n");
       
   while(list != NULL) {
-    arp_req(list->ifname, list->ipaddr_ia, 0);
+    arp_req(list->ifname, list->ipaddr_ia, nulladdr, 0);
     list = list->next;
   }
 }
@@ -357,27 +360,38 @@ void *arp(char *ifname)
   }
 
   while (1) {
-    ether_arp_frame frame;
-    unsigned long src;
-    unsigned long dst;
-    struct in_addr sia;
-    struct in_addr dia;
-
-    do {
+      ether_arp_frame frame;
+      unsigned long src;
+      unsigned long dst;
+      struct in_addr sia;
+      struct in_addr dia;
+      struct sockaddr_in *sin;
+      
       pthread_testcancel();
       /* Sleep a bit in order not to overload the system */
       usleep(300);
 
       if (arp_recv(sock, &frame) <= 0)
     	    continue;
-      /* Insert all the replies into ARP table */
-      if (frame.arp.arp_op == ntohs(ARPOP_REPLY)) {
 
-    	  /* Received frame is an ARP reply */
-	  
+      memcpy(&src,(char *)frame.arp.arp_spa,4);
+      memcpy(&dst,(char *)frame.arp.arp_tpa,4);
+    
+      dia.s_addr = dst;
+      sia.s_addr = src;
+    
+      if (option_network_size >= 0) {
+	struct in_addr network;
+	
+	network.s_addr = htonl(ntohl(sia.s_addr) & (0xffffffff << (32-option_network_size)));
+	if ( memcmp(&network, &option_network_number, sizeof(struct in_addr)) )
+	    continue;
+      }
+
+      /* Insert all the replies and requests into ARP table */
+      if (frame.arp.arp_op == ntohs(ARPOP_REPLY) || frame.arp.arp_op == ntohs(ARPOP_REQUEST) ) {
 	  struct arpreq k_arpreq;
 	  int arpsock;
-	  struct sockaddr_in *sin;
 	  
 	  if ((arpsock = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
 		syslog(LOG_ERR, "error: ARP socket for %s: %s", (char *) ifname, strerror(errno));
@@ -405,44 +419,49 @@ void *arp(char *ifname)
 	        continue;
 	  }
 	  close(arpsock);
+      }
 
-	  /* Check if reply is for one of the requests in request queue */
-	  rq_process(sin->sin_addr, ifs.sll_ifindex);
+      if (frame.arp.arp_op == ntohs(ARPOP_REPLY)) {
+	/* Received frame is an ARP reply */
+
+	/* Check if reply is for one of the requests in request queue */
+	rq_process(sin->sin_addr, ifs.sll_ifindex);
 
 	/* send gratuitous arp request to all other interfaces to let them
 	 * update their ARP tables quickly */ 	  
-	for (i=0; i <= last_iface_idx; i++) {
+	if (option_sendgratuitous) {
+	  struct in_addr nulladdr;
+	  nulladdr.s_addr = 0;
+	  for (i=0; i <= last_iface_idx; i++) {
 	    if (strcmp(ifaces[i], ifname)) {
-		arp_req(ifaces[i], sin->sin_addr, 1);
+		arp_req(ifaces[i], sin->sin_addr, nulladdr, 1);
 	    }
+	  }
 	}
       }
-    } while (frame.arp.arp_op != htons(ARPOP_REQUEST));
 
-    /* Received frame is an ARP request */
+      if (frame.arp.arp_op == ntohs(ARPOP_REQUEST)) {
+	/* Received frame is an ARP request */
 
-    memcpy(&src,(char *)frame.arp.arp_spa,4);
-    memcpy(&dst,(char *)frame.arp.arp_tpa,4);
-    
-    dia.s_addr = dst;
-    sia.s_addr = src;
-    
-    if (debug)
-	  printf("Received ARP request for %s on iface %s\n", inet_ntoa(dia), (char *) ifname);
-
-    if (memcmp(&dia,&sia,sizeof(dia)) && dia.s_addr != 0) {
-        pthread_mutex_lock(&arptab_mutex);
-        /* Relay the ARP request to all other interfaces */
-	for (i=0; i <= last_iface_idx; i++) {
-    	    if (strcmp(ifaces[i], ifname)) {
-		arp_req(ifaces[i], dia, 0);
+	if (debug) {
+	    printf("Received ARP request for %s ", inet_ntoa(dia));
+	    printf("from %s on iface %s\n", inet_ntoa(sia), (char *) ifname);
 	    }
-	}
-	/* Add the request to the request queue */
-	if (debug)
-    	    printf("Adding %s to request queue\n", inet_ntoa(sia));
-	rq_add(&frame, &ifs);
-	pthread_mutex_unlock(&arptab_mutex);
-    }    
+
+	if (memcmp(&dia,&sia,sizeof(dia)) && dia.s_addr != 0) {
+	    pthread_mutex_lock(&arptab_mutex);
+	    /* Relay the ARP request to all other interfaces */
+	    for (i=0; i <= last_iface_idx; i++) {
+		if (strcmp(ifaces[i], ifname)) {
+		    arp_req(ifaces[i], dia, sia, 0);
+		}
+	    }
+	    /* Add the request to the request queue */
+	    if (debug)
+		printf("Adding %s to request queue\n", inet_ntoa(sia));
+	    rq_add(&frame, &ifs);
+	    pthread_mutex_unlock(&arptab_mutex);
+	}    
+      }
   }
 }
