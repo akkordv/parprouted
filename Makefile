@@ -1,11 +1,12 @@
 EXTRA_CFLAGS = 
 
+PREFIX = $(DESTDIR)/usr
+
 #CC = gcc
 
 CFLAGS = -g -O2 -Wall $(EXTRA_CFLAGS)
 # For ARM:
 # CFLAGS =  -Wall $(EXTRA_CFLAGS)
-LDFLAGS = 
 OBJS = parprouted.o arp.o
 
 LIBS = -lpthread
@@ -13,8 +14,8 @@ LIBS = -lpthread
 all: parprouted
 
 install: all
-	install parprouted /usr/local/sbin
-	install parprouted.8 /usr/local/man/man8
+	install parprouted $(PREFIX)/sbin
+	install parprouted.8 $(PREFIX)/share/man/man8
 
 clean:
 	rm -f $(OBJS) parprouted core
